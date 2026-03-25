@@ -2,6 +2,7 @@ const Battle = require('../models/Battle');
 const Team = require('../models/Team');
 const User = require('../models/User');
 const { getPokemonByNameOrId, getTypeAdvantage, client } = require('../services/pokeApiService');
+const { sendPushToUser } = require('../services/pushService');
 
 const sumStats = (pokemon) => pokemon.stats.reduce((acc, item) => acc + item.base_stat, 0);
 
@@ -48,22 +49,40 @@ const teamScore = async (team, rivalTeam) => {
 
 const createBattle = async (req, res, next) => {
   try {
-    const { friendId, teamId, opponentTeamId } = req.body;
+    const { friendId, friendCode, teamId, opponentTeamId } = req.body;
 
-    if (!friendId || !teamId || !opponentTeamId) {
+    if ((!friendId && !friendCode) || !teamId || !opponentTeamId) {
       return res.status(400).json({
-        message: 'friendId, teamId y opponentTeamId son requeridos',
+        message: 'friendId o friendCode, teamId y opponentTeamId son requeridos',
       });
     }
 
     const me = await User.findById(req.user._id);
+    let opponentUser = null;
 
-    if (!me.friends.some((id) => id.equals(friendId))) {
-      return res.status(403).json({ message: 'Solo puedes batallar con tus amigas' });
+    if (friendId) {
+      opponentUser = await User.findById(friendId);
+    } else {
+      opponentUser = await User.findOne({
+        friendCode: String(friendCode || '').toUpperCase().trim(),
+      });
+    }
+
+    if (!opponentUser) {
+      return res.status(404).json({ message: 'No se encontró la jugadora rival' });
+    }
+
+    if (opponentUser._id.equals(req.user._id)) {
+      return res.status(400).json({ message: 'No puedes retarte a ti misma' });
+    }
+
+    if (!me.friends.some((id) => id.equals(opponentUser._id))) {
+      await User.updateOne({ _id: req.user._id }, { $addToSet: { friends: opponentUser._id } });
+      await User.updateOne({ _id: opponentUser._id }, { $addToSet: { friends: req.user._id } });
     }
 
     const team = await Team.findOne({ _id: teamId, user: req.user._id });
-    const opponentTeam = await Team.findOne({ _id: opponentTeamId, user: friendId });
+    const opponentTeam = await Team.findOne({ _id: opponentTeamId, user: opponentUser._id });
 
     if (!team || !opponentTeam) {
       return res.status(404).json({ message: 'No se encontró alguno de los equipos' });
@@ -80,11 +99,11 @@ const createBattle = async (req, res, next) => {
 
     const userScore = myScoreBase + Math.floor(Math.random() * 20);
     const opponentScore = opponentScoreBase + Math.floor(Math.random() * 20);
-    const winner = userScore >= opponentScore ? req.user._id : friendId;
+    const winner = userScore >= opponentScore ? req.user._id : opponentUser._id;
 
     const battle = await Battle.create({
       user: req.user._id,
-      opponent: friendId,
+      opponent: opponentUser._id,
       team: team._id,
       opponentTeam: opponentTeam._id,
       winner,
@@ -94,6 +113,14 @@ const createBattle = async (req, res, next) => {
         winner.toString() === req.user._id.toString()
           ? 'Ganaste la batalla por ventaja estratégica.'
           : 'Tu amiga ganó la batalla en esta ronda.',
+    });
+
+    await sendPushToUser(opponentUser._id, {
+      title: 'Te retaron a una batalla',
+      body: `${req.user.email} te retó en Pokédex Battles.`,
+      url: '/battles',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
     });
 
     res.status(201).json(battle);

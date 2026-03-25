@@ -5,6 +5,14 @@ const teamPokemonSchema = new mongoose.Schema(
     pokemonId: { type: Number, required: true },
     pokemonName: { type: String, required: true },
     nickname: { type: String, default: '' },
+    moves: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (value) => value.length <= 4,
+        message: 'Cada pokémon puede tener máximo 4 movimientos',
+      },
+    },
     role: { type: String, default: '' },
   },
   { _id: false }

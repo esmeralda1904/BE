@@ -5,6 +5,8 @@ const client = axios.create({
   timeout: 12000,
 });
 
+const moveNameCache = new Map();
+
 const REGION_POKEDEX = {
   kanto: 'kanto',
   johto: 'original-johto',
@@ -32,10 +34,34 @@ const getPokemonByNameOrId = async (idOrName) => {
   return data;
 };
 
+const normalizeMoveName = (moveName) => moveName.replace(/-/g, ' ');
+
+const getMoveNameInSpanish = async (move) => {
+  if (moveNameCache.has(move.url)) {
+    return moveNameCache.get(move.url);
+  }
+
+  try {
+    const { data } = await client.get(move.url);
+    const spanishName = data.names.find((entry) => entry.language.name === 'es')?.name;
+    const localized = spanishName || normalizeMoveName(move.name);
+    moveNameCache.set(move.url, localized);
+    return localized;
+  } catch (error) {
+    const fallbackName = normalizeMoveName(move.name);
+    moveNameCache.set(move.url, fallbackName);
+    return fallbackName;
+  }
+};
+
 const getPokemonDetail = async (idOrName) => {
   const pokemon = await getPokemonByNameOrId(idOrName);
   const { data: species } = await client.get(`/pokemon-species/${pokemon.id}`);
   const { data: evolution } = await client.get(species.evolution_chain.url);
+  const selectedMoves = pokemon.moves.slice(0, 16);
+  const localizedMoves = await Promise.all(
+    selectedMoves.map((moveEntry) => getMoveNameInSpanish(moveEntry.move))
+  );
 
   return {
     id: pokemon.id,
@@ -47,7 +73,7 @@ const getPokemonDetail = async (idOrName) => {
       value: item.base_stat,
     })),
     types: pokemon.types.map((item) => item.type.name),
-    attacks: pokemon.moves.slice(0, 6).map((item) => item.move.name),
+    attacks: [...new Set(localizedMoves)],
     evolutionLine: flattenEvolution(evolution.chain),
   };
 };

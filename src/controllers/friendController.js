@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { sendPushToUser } = require('../services/pushService');
 
 const addFriendByCode = async (req, res, next) => {
   try {
@@ -20,6 +21,14 @@ const addFriendByCode = async (req, res, next) => {
 
     await User.updateOne({ _id: req.user._id }, { $addToSet: { friends: friend._id } });
     await User.updateOne({ _id: friend._id }, { $addToSet: { friends: req.user._id } });
+
+    await sendPushToUser(friend._id, {
+      title: 'Nueva invitación de amistad',
+      body: `${req.user.email} te agregó como amiga.`,
+      url: '/friends',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+    });
 
     res.status(201).json({ message: 'Amiga agregada correctamente', friendCode: friend.friendCode });
   } catch (error) {

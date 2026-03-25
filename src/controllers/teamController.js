@@ -1,6 +1,9 @@
 const Team = require('../models/Team');
 const User = require('../models/User');
 
+const hasInvalidMoves = (pokemons = []) =>
+  pokemons.some((pokemon) => Array.isArray(pokemon.moves) && pokemon.moves.length > 4);
+
 const listTeams = async (req, res, next) => {
   try {
     const teams = await Team.find({ user: req.user._id }).sort({ updatedAt: -1 });
@@ -22,6 +25,10 @@ const createTeam = async (req, res, next) => {
       return res.status(400).json({ message: 'Máximo 6 pokémon por equipo' });
     }
 
+    if (hasInvalidMoves(pokemons)) {
+      return res.status(400).json({ message: 'Cada pokémon puede tener máximo 4 movimientos' });
+    }
+
     const team = await Team.create({ user: req.user._id, name, pokemons });
     res.status(201).json(team);
   } catch (error) {
@@ -35,6 +42,10 @@ const updateTeam = async (req, res, next) => {
 
     if (pokemons.length > 6) {
       return res.status(400).json({ message: 'Máximo 6 pokémon por equipo' });
+    }
+
+    if (hasInvalidMoves(pokemons)) {
+      return res.status(400).json({ message: 'Cada pokémon puede tener máximo 4 movimientos' });
     }
 
     const team = await Team.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, req.body, {
@@ -81,10 +92,40 @@ const listFriendTeams = async (req, res, next) => {
   }
 };
 
+const listFriendTeamsByCode = async (req, res, next) => {
+  try {
+    const friendCode = String(req.params.friendCode || '').toUpperCase().trim();
+
+    if (!friendCode) {
+      return res.status(400).json({ message: 'friendCode requerido' });
+    }
+
+    const friend = await User.findOne({ friendCode }).select('email friendCode');
+
+    if (!friend) {
+      return res.status(404).json({ message: 'No se encontró jugadora con ese código' });
+    }
+
+    if (friend._id.equals(req.user._id)) {
+      return res.status(400).json({ message: 'No puedes usar tu propio código' });
+    }
+
+    const teams = await Team.find({ user: friend._id }).sort({ updatedAt: -1 });
+
+    return res.json({
+      friend,
+      teams,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   listTeams,
   createTeam,
   updateTeam,
   deleteTeam,
   listFriendTeams,
+  listFriendTeamsByCode,
 };
