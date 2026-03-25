@@ -199,9 +199,32 @@ const rejectFriendRequest = async (req, res, next) => {
   }
 };
 
+const removeFriend = async (req, res, next) => {
+  try {
+    const { friendId } = req.params;
+    const me = await User.findById(req.user._id);
+
+    if (!me) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    if (!me.friends.some((id) => id.equals(friendId))) {
+      return res.status(404).json({ message: 'Esta usuaria no está en tu lista de amigas' });
+    }
+
+    await User.updateOne({ _id: req.user._id }, { $pull: { friends: friendId } });
+    await User.updateOne({ _id: friendId }, { $pull: { friends: req.user._id } });
+
+    return res.json({ message: 'Amiga eliminada correctamente' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   addFriendByCode,
   listFriends,
   acceptFriendRequest,
   rejectFriendRequest,
+  removeFriend,
 };

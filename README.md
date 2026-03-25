@@ -28,6 +28,7 @@ npm run dev
 - `GET /api/teams/friend/:friendId`
 - `GET /api/friends`
 - `POST /api/friends/add`
+- `DELETE /api/friends/:friendId`
 - `POST /api/friends/requests/:requesterId/accept`
 - `DELETE /api/friends/requests/:requesterId`
 - `GET|POST /api/battles`
