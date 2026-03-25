@@ -36,7 +36,7 @@ const subscribePush = async (req, res, next) => {
 
 const sendTestPush = async (req, res, next) => {
   try {
-    const { userId, title, body, url } = req.body;
+    const { userId, title, body, url, actions, actionUrls } = req.body;
     const targetUserId = userId || req.user._id;
 
     const result = await sendPushToUser(targetUserId, {
@@ -45,6 +45,8 @@ const sendTestPush = async (req, res, next) => {
       url: url || '/',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
+      actions: Array.isArray(actions) ? actions : [],
+      actionUrls: actionUrls && typeof actionUrls === 'object' ? actionUrls : {},
     });
 
     return res.json({ message: 'Push enviado', result });

@@ -77,8 +77,9 @@ const createBattle = async (req, res, next) => {
     }
 
     if (!me.friends.some((id) => id.equals(opponentUser._id))) {
-      await User.updateOne({ _id: req.user._id }, { $addToSet: { friends: opponentUser._id } });
-      await User.updateOne({ _id: opponentUser._id }, { $addToSet: { friends: req.user._id } });
+      return res.status(403).json({
+        message: 'Solo puedes retar a usuarias que ya aceptaron tu amistad',
+      });
     }
 
     const team = await Team.findOne({ _id: teamId, user: req.user._id });
@@ -121,6 +122,12 @@ const createBattle = async (req, res, next) => {
       url: '/battles',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
+      actions: [
+        { action: 'open-battles', title: 'Ver batalla' },
+      ],
+      actionUrls: {
+        'open-battles': '/battles',
+      },
     });
 
     res.status(201).json(battle);

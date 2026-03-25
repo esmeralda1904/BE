@@ -6,6 +6,8 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     friendCode: { type: String, required: true, unique: true, uppercase: true },
     friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    friendRequestsReceived: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    friendRequestsSent: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true }
 );
