@@ -47,6 +47,22 @@ const removeSubscriptionByEndpoint = async (endpoint) => {
   await PushSubscription.deleteOne({ endpoint });
 };
 
+const getWebPushOptions = (notificationPayload = {}) => {
+  const ttlValue = Number(notificationPayload.ttlSeconds);
+  const ttlSeconds = Number.isFinite(ttlValue) && ttlValue >= 0 ? Math.floor(ttlValue) : 45;
+  const urgency = String(notificationPayload.urgency || 'high').toLowerCase();
+  const topic = typeof notificationPayload.tag === 'string' ? notificationPayload.tag.slice(0, 32) : undefined;
+
+  return {
+    TTL: ttlSeconds,
+    urgency,
+    topic,
+    headers: {
+      Urgency: urgency,
+    },
+  };
+};
+
 const sendPushToUser = async (userId, notificationPayload) => {
   if (!ensureVapidSetup()) {
     return { sent: 0, removed: 0, skipped: true };
@@ -57,6 +73,7 @@ const sendPushToUser = async (userId, notificationPayload) => {
   let removed = 0;
 
   const payload = JSON.stringify(notificationPayload);
+  const pushOptions = getWebPushOptions(notificationPayload);
 
   for (const subscription of subscriptions) {
     try {
@@ -66,7 +83,8 @@ const sendPushToUser = async (userId, notificationPayload) => {
           expirationTime: subscription.expirationTime,
           keys: subscription.keys,
         },
-        payload
+        payload,
+        pushOptions
       );
       sent += 1;
     } catch (error) {

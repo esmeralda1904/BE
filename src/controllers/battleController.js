@@ -122,6 +122,9 @@ const createBattle = async (req, res, next) => {
       url: '/battles',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
+      tag: 'battle-challenge',
+      urgency: 'high',
+      ttlSeconds: 30,
       actions: [
         { action: 'open-battles', title: 'Ver batalla' },
       ],

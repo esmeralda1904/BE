@@ -60,6 +60,9 @@ const addFriendByCode = async (req, res, next) => {
         url: '/friends',
         icon: '/icon-192.png',
         badge: '/icon-96.png',
+        tag: 'friend-request-accepted',
+        urgency: 'high',
+        ttlSeconds: 30,
       });
 
       return res.status(201).json({
@@ -87,6 +90,9 @@ const addFriendByCode = async (req, res, next) => {
       url: '/friends',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
+      tag: 'friend-request',
+      urgency: 'high',
+      ttlSeconds: 30,
       actions: [
         { action: 'open-friends', title: 'Ver solicitud' },
       ],
@@ -161,6 +167,9 @@ const acceptFriendRequest = async (req, res, next) => {
       url: '/friends',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
+      tag: 'friend-request-accepted',
+      urgency: 'high',
+      ttlSeconds: 30,
       actions: [
         { action: 'open-friends', title: 'Ver amigas' },
       ],
