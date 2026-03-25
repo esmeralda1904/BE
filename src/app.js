@@ -19,10 +19,40 @@ const allowedOrigins = (process.env.FRONTEND_URL || '*')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeOrigin = (origin) => origin.trim().replace(/\/$/, '');
+
+const isOriginAllowed = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  const normalizedOrigin = normalizeOrigin(origin);
+
+  return allowedOrigins.some((allowedOrigin) => {
+    if (allowedOrigin === '*') {
+      return true;
+    }
+
+    const normalizedAllowedOrigin = normalizeOrigin(allowedOrigin);
+
+    if (!normalizedAllowedOrigin.includes('*')) {
+      return normalizedAllowedOrigin === normalizedOrigin;
+    }
+
+    const wildcardPattern = `^${normalizedAllowedOrigin
+      .split('*')
+      .map((segment) => escapeRegExp(segment))
+      .join('.*')}$`;
+
+    return new RegExp(wildcardPattern).test(normalizedOrigin);
+  });
+};
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      if (isOriginAllowed(origin)) {
         callback(null, true);
         return;
       }
