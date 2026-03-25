@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { sendPushToUser } = require('../services/pushService');
 
 const toPublicUser = (user) => ({
   _id: user._id,
@@ -71,6 +72,27 @@ const addFriendByCode = async (req, res, next) => {
       { _id: friend._id },
       { $addToSet: { friendRequestsReceived: req.user._id }, $pull: { friendRequestsSent: req.user._id } }
     );
+
+    await sendPushToUser(friend._id, {
+      title: 'Nueva invitación de amistad',
+      body: `${req.user.email} te envió una solicitud de amistad.`,
+      url: '/friends',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'friend-invite',
+      urgency: 'high',
+      ttlSeconds: 60,
+      actions: [{ action: 'open-friends', title: 'Ver solicitud' }],
+      actionUrls: {
+        'open-friends': '/friends',
+      },
+      data: {
+        type: 'friend-invite',
+        senderId: req.user._id,
+        senderEmail: req.user.email,
+        senderFriendCode: req.user.friendCode,
+      },
+    });
 
     res.status(201).json({
       message: 'Solicitud de amistad enviada',

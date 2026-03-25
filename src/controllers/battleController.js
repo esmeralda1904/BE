@@ -124,12 +124,18 @@ const createBattle = async (req, res, next) => {
       badge: '/icon-96.png',
       tag: 'battle-challenge',
       urgency: 'high',
-      ttlSeconds: 30,
+      ttlSeconds: 60,
       actions: [
         { action: 'open-battles', title: 'Ver batalla' },
       ],
       actionUrls: {
         'open-battles': '/battles',
+      },
+      data: {
+        type: 'battle-challenge',
+        challengerId: req.user._id,
+        challengerEmail: req.user.email,
+        battleId: battle._id,
       },
     });
 
