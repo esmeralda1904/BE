@@ -14,13 +14,23 @@ const { errorHandler, notFound } = require('./middleware/errorHandler');
 dotenv.config();
 
 const app = express();
+const stripWrappingQuotes = (value) => value.replace(/^['"]|['"]$/g, '');
 const allowedOrigins = (process.env.FRONTEND_URL || '*')
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => stripWrappingQuotes(origin.trim()))
   .filter(Boolean);
+const allowRailwayOrigins = process.env.ALLOW_RAILWAY_ORIGINS !== 'false';
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeOrigin = (origin) => origin.trim().replace(/\/$/, '');
+const isRailwayOrigin = (origin) => {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname.endsWith('.up.railway.app');
+  } catch (error) {
+    return false;
+  }
+};
 
 const isOriginAllowed = (origin) => {
   if (!origin) {
@@ -28,6 +38,10 @@ const isOriginAllowed = (origin) => {
   }
 
   const normalizedOrigin = normalizeOrigin(origin);
+
+  if (allowRailwayOrigins && isRailwayOrigin(normalizedOrigin)) {
+    return true;
+  }
 
   return allowedOrigins.some((allowedOrigin) => {
     if (allowedOrigin === '*') {
