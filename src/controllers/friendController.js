@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const { sendPushToUser } = require('../services/pushService');
 
 const toPublicUser = (user) => ({
   _id: user._id,
@@ -54,17 +53,6 @@ const addFriendByCode = async (req, res, next) => {
         }
       );
 
-      await sendPushToUser(friend._id, {
-        title: 'Solicitud aceptada',
-        body: `${req.user.email} aceptó tu solicitud de amistad.`,
-        url: '/friends',
-        icon: '/icon-192.png',
-        badge: '/icon-96.png',
-        tag: 'friend-request-accepted',
-        urgency: 'high',
-        ttlSeconds: 30,
-      });
-
       return res.status(201).json({
         message: 'Solicitud aceptada. Ahora son amigas.',
         status: 'accepted',
@@ -83,23 +71,6 @@ const addFriendByCode = async (req, res, next) => {
       { _id: friend._id },
       { $addToSet: { friendRequestsReceived: req.user._id }, $pull: { friendRequestsSent: req.user._id } }
     );
-
-    await sendPushToUser(friend._id, {
-      title: 'Nueva invitación de amistad',
-      body: `${req.user.email} te envió una solicitud de amistad.`,
-      url: '/friends',
-      icon: '/icon-192.png',
-      badge: '/icon-96.png',
-      tag: 'friend-request',
-      urgency: 'high',
-      ttlSeconds: 30,
-      actions: [
-        { action: 'open-friends', title: 'Ver solicitud' },
-      ],
-      actionUrls: {
-        'open-friends': '/friends',
-      },
-    });
 
     res.status(201).json({
       message: 'Solicitud de amistad enviada',
@@ -160,23 +131,6 @@ const acceptFriendRequest = async (req, res, next) => {
         $pull: { friendRequestsSent: req.user._id, friendRequestsReceived: req.user._id },
       }
     );
-
-    await sendPushToUser(requesterId, {
-      title: 'Solicitud aceptada',
-      body: `${req.user.email} aceptó tu solicitud de amistad.`,
-      url: '/friends',
-      icon: '/icon-192.png',
-      badge: '/icon-96.png',
-      tag: 'friend-request-accepted',
-      urgency: 'high',
-      ttlSeconds: 30,
-      actions: [
-        { action: 'open-friends', title: 'Ver amigas' },
-      ],
-      actionUrls: {
-        'open-friends': '/friends',
-      },
-    });
 
     return res.json({ message: 'Solicitud aceptada' });
   } catch (error) {
