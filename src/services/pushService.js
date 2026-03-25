@@ -65,12 +65,13 @@ const getWebPushOptions = (notificationPayload = {}) => {
 
 const sendPushToUser = async (userId, notificationPayload) => {
   if (!ensureVapidSetup()) {
-    return { sent: 0, removed: 0, skipped: true };
+    return { sent: 0, removed: 0, failures: 0, skipped: true };
   }
 
   const subscriptions = await PushSubscription.find({ user: userId });
   let sent = 0;
   let removed = 0;
+  let failures = 0;
 
   const payload = JSON.stringify(notificationPayload);
   const pushOptions = getWebPushOptions(notificationPayload);
@@ -91,11 +92,25 @@ const sendPushToUser = async (userId, notificationPayload) => {
       if (error.statusCode === 404 || error.statusCode === 410) {
         await removeSubscriptionByEndpoint(subscription.endpoint);
         removed += 1;
+      } else {
+        failures += 1;
+        console.error('[Push] Notification send failed', {
+          userId: String(userId),
+          endpoint: subscription.endpoint,
+          statusCode: error.statusCode,
+          message: error.message,
+        });
       }
     }
   }
 
-  return { sent, removed, skipped: false };
+  return {
+    sent,
+    removed,
+    failures,
+    skipped: false,
+    subscriptions: subscriptions.length,
+  };
 };
 
 module.exports = {

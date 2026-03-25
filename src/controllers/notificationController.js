@@ -28,7 +28,21 @@ const subscribePush = async (req, res, next) => {
 
     await subscribeUser(req.user._id, subscription);
 
-    return res.status(201).json({ message: 'Suscripción registrada' });
+    const testPushResult = await sendPushToUser(req.user._id, {
+      title: 'Notificaciones activadas',
+      body: 'Ya recibirás solicitudes de amistad en tu barra de notificaciones.',
+      url: '/friends',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'push-enabled',
+      urgency: 'high',
+      ttlSeconds: 30,
+    });
+
+    return res.status(201).json({
+      message: 'Suscripción registrada',
+      testPush: testPushResult,
+    });
   } catch (error) {
     next(error);
   }
