@@ -117,8 +117,13 @@ const listPokemons = async ({ limit = 24, offset = 0, name, type1, type2, region
         total: 1,
         items: [
           {
+            id: pokemon.id,
             name: pokemon.name,
             url: `${client.defaults.baseURL}/pokemon/${pokemon.id}`,
+            image:
+              pokemon.sprites?.other?.['official-artwork']?.front_default ||
+              pokemon.sprites?.front_default ||
+              '',
           },
         ],
       };
@@ -173,9 +178,25 @@ const listPokemons = async ({ limit = 24, offset = 0, name, type1, type2, region
   const cappedLimit = Math.min(Math.max(Number(limit), 1), 100);
   const paged = names.slice(safeOffset, safeOffset + cappedLimit);
 
+  const detailedItems = await Promise.all(
+    paged.map(async (entry) => {
+      const pokemon = await getPokemonByNameOrId(entry);
+
+      return {
+        id: pokemon.id,
+        name: pokemon.name,
+        url: `${client.defaults.baseURL}/pokemon/${pokemon.id}`,
+        image:
+          pokemon.sprites?.other?.['official-artwork']?.front_default ||
+          pokemon.sprites?.front_default ||
+          '',
+      };
+    })
+  );
+
   return {
     total: names.length,
-    items: paged.map((entry) => ({ name: entry, url: `${client.defaults.baseURL}/pokemon/${entry}` })),
+    items: detailedItems,
   };
 };
 
