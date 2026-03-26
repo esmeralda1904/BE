@@ -24,8 +24,14 @@ const getSpeedValue = (pokemonData) => getStatValue(pokemonData, 'speed', 60);
 
 const resolveRound = async (battle) => {
   const [userData, opponentData] = await Promise.all([
-    getPokemonByNameOrId(battle.userActivePokemon.pokemonId || battle.userActivePokemon.pokemonName),
-    getPokemonByNameOrId(battle.opponentActivePokemon.pokemonId || battle.opponentActivePokemon.pokemonName),
+    getPokemonForBattle(
+      battle.userActivePokemon.pokemonId || battle.userActivePokemon.pokemonName,
+      'activo del retador'
+    ),
+    getPokemonForBattle(
+      battle.opponentActivePokemon.pokemonId || battle.opponentActivePokemon.pokemonName,
+      'activo del oponente'
+    ),
   ]);
 
   const userMove = normalizeMove(battle.pendingMoves.user);
@@ -114,13 +120,25 @@ const resolveOpponent = async ({ friendId, friendCode }) => {
   });
 };
 
+const getPokemonForBattle = async (pokemonRef, contextLabel) => {
+  try {
+    return await getPokemonByNameOrId(pokemonRef);
+  } catch (error) {
+    const wrappedError = new Error(
+      `No se pudo cargar el pokémon ${contextLabel}. Verifica que el equipo tenga pokémon válidos.`
+    );
+    wrappedError.status = 400;
+    throw wrappedError;
+  }
+};
+
 const initializeBattleWithTeams = async (battle, userTeam, opponentTeam) => {
   const userActive = userTeam.pokemons[0];
   const opponentActive = opponentTeam.pokemons[0];
 
   const [userData, opponentData] = await Promise.all([
-    getPokemonByNameOrId(userActive.pokemonId || userActive.pokemonName),
-    getPokemonByNameOrId(opponentActive.pokemonId || opponentActive.pokemonName),
+    getPokemonForBattle(userActive.pokemonId || userActive.pokemonName, 'del retador'),
+    getPokemonForBattle(opponentActive.pokemonId || opponentActive.pokemonName, 'del oponente'),
   ]);
 
   battle.team = userTeam._id;
@@ -196,7 +214,7 @@ const createBattleChallenge = async (req, res, next) => {
       urgency: 'high',
       ttlSeconds: 60,
       actions: [
-        { action: 'open-battles', title: 'Ver batalla' },
+        { action: 'open-battles', title: 'Aceptar' },
       ],
       actionUrls: {
         'open-battles': '/battles',
@@ -634,10 +652,6 @@ const deleteBattle = async (req, res, next) => {
 
     if (!isParticipant) {
       return res.status(403).json({ message: 'No tienes acceso para eliminar esta batalla' });
-    }
-
-    if (battle.status !== 'finished') {
-      return res.status(409).json({ message: 'Solo puedes eliminar batallas ya jugadas' });
     }
 
     await Battle.deleteOne({ _id: battleId });
