@@ -78,7 +78,7 @@ const createBattle = async (req, res, next) => {
 
     if (!me.friends.some((id) => id.equals(opponentUser._id))) {
       return res.status(403).json({
-        message: 'Solo puedes retar a usuarias que ya aceptaron tu amistad',
+        message: 'Solo puedes retar a usuarios que ya aceptaron tu amistad',
       });
     }
 
@@ -113,7 +113,7 @@ const createBattle = async (req, res, next) => {
       summary:
         winner.toString() === req.user._id.toString()
           ? 'Ganaste la batalla por ventaja estratégica.'
-          : 'Tu amiga ganó la batalla en esta ronda.',
+          : 'Tu amigo ganó la batalla en esta ronda.',
     });
 
     await sendPushToUser(opponentUser._id, {

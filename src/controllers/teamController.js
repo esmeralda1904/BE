@@ -82,7 +82,7 @@ const listFriendTeams = async (req, res, next) => {
     const me = await User.findById(req.user._id);
 
     if (!me.friends.some((id) => id.equals(friendId))) {
-      return res.status(403).json({ message: 'Solo puedes ver equipos de tus amigas' });
+      return res.status(403).json({ message: 'Solo puedes ver equipos de tus amigos' });
     }
 
     const teams = await Team.find({ user: friendId }).sort({ updatedAt: -1 });

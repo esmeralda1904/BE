@@ -32,7 +32,7 @@ const addFriendByCode = async (req, res, next) => {
     }
 
     if (me.friends.some((id) => id.equals(friend._id))) {
-      return res.status(409).json({ message: 'Ya son amigas' });
+      return res.status(409).json({ message: 'Ya son amigos' });
     }
 
     const hasIncomingRequest = me.friendRequestsReceived.some((id) => id.equals(friend._id));
@@ -54,14 +54,34 @@ const addFriendByCode = async (req, res, next) => {
         }
       );
 
+      await sendPushToUser(friend._id, {
+        title: '¡Nuevo Amigo! 🤝',
+        body: `${req.user.email} usó tu código y te ha agregado. ¡Ya son amigos!`,
+        url: '/friends',
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'friend-accepted',
+        urgency: 'high',
+        ttlSeconds: 60,
+        actions: [{ action: 'open-friends', title: 'Ver amigos' }],
+        actionUrls: {
+          'open-friends': '/friends',
+        },
+        data: {
+          type: 'friend-accepted',
+          accepterId: req.user._id,
+          accepterEmail: req.user.email,
+        },
+      });
+
       return res.status(201).json({
-        message: 'Solicitud aceptada. Ahora son amigas.',
+        message: 'Solicitud aceptada. Ahora son amigos.',
         status: 'accepted',
       });
     }
 
     if (alreadySent) {
-      return res.status(409).json({ message: 'Ya enviaste una solicitud a esta usuaria' });
+      return res.status(409).json({ message: 'Ya enviaste una solicitud a este usuario' });
     }
 
     await User.updateOne(
@@ -74,20 +94,20 @@ const addFriendByCode = async (req, res, next) => {
     );
 
     await sendPushToUser(friend._id, {
-      title: 'Nueva invitación de amistad',
-      body: `${req.user.email} te envió una solicitud de amistad.`,
+      title: '¡Nuevo Amigo! 🤝',
+      body: `${req.user.email} usó tu código y te ha agregado. ¡Ya son amigos!`,
       url: '/friends',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
-      tag: 'friend-invite',
+      tag: 'friend-code-invite',
       urgency: 'high',
       ttlSeconds: 60,
-      actions: [{ action: 'open-friends', title: 'Ver solicitud' }],
+      actions: [{ action: 'open-friends', title: 'Ver amigos' }],
       actionUrls: {
         'open-friends': '/friends',
       },
       data: {
-        type: 'friend-invite',
+        type: 'friend-code-invite',
         senderId: req.user._id,
         senderEmail: req.user.email,
         senderFriendCode: req.user.friendCode,
@@ -135,7 +155,7 @@ const acceptFriendRequest = async (req, res, next) => {
     }
 
     if (!me.friendRequestsReceived.some((id) => id.equals(requesterId))) {
-      return res.status(404).json({ message: 'No existe solicitud pendiente de esta usuaria' });
+      return res.status(404).json({ message: 'No existe solicitud pendiente de este usuario' });
     }
 
     await User.updateOne(
@@ -153,6 +173,26 @@ const acceptFriendRequest = async (req, res, next) => {
         $pull: { friendRequestsSent: req.user._id, friendRequestsReceived: req.user._id },
       }
     );
+
+    await sendPushToUser(requesterId, {
+      title: '¡Nuevo Amigo! 🤝',
+      body: `${req.user.email} aceptó tu solicitud. ¡Ya son amigos!`,
+      url: '/friends',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'friend-accepted',
+      urgency: 'high',
+      ttlSeconds: 60,
+      actions: [{ action: 'open-friends', title: 'Ver amigos' }],
+      actionUrls: {
+        'open-friends': '/friends',
+      },
+      data: {
+        type: 'friend-accepted',
+        accepterId: req.user._id,
+        accepterEmail: req.user.email,
+      },
+    });
 
     return res.json({ message: 'Solicitud aceptada' });
   } catch (error) {
@@ -194,13 +234,13 @@ const removeFriend = async (req, res, next) => {
     }
 
     if (!me.friends.some((id) => id.equals(friendId))) {
-      return res.status(404).json({ message: 'Esta usuaria no está en tu lista de amigas' });
+      return res.status(404).json({ message: 'Este usuario no está en tu lista de amigos' });
     }
 
     await User.updateOne({ _id: req.user._id }, { $pull: { friends: friendId } });
     await User.updateOne({ _id: friendId }, { $pull: { friends: req.user._id } });
 
-    return res.json({ message: 'Amiga eliminada correctamente' });
+    return res.json({ message: 'Amigo eliminado correctamente' });
   } catch (error) {
     next(error);
   }
