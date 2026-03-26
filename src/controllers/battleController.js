@@ -501,6 +501,32 @@ const listMyBattles = async (req, res, next) => {
   }
 };
 
+const deleteBattle = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const battle = await Battle.findById(battleId);
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Batalla no encontrada' });
+    }
+
+    const isParticipant = battle.user.equals(req.user._id) || battle.opponent.equals(req.user._id);
+
+    if (!isParticipant) {
+      return res.status(403).json({ message: 'No tienes acceso para eliminar esta batalla' });
+    }
+
+    if (battle.status !== 'finished') {
+      return res.status(409).json({ message: 'Solo puedes eliminar batallas ya jugadas' });
+    }
+
+    await Battle.deleteOne({ _id: battleId });
+    return res.json({ message: 'Batalla eliminada correctamente' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createBattleChallenge,
   acceptBattleChallenge,
@@ -510,4 +536,5 @@ module.exports = {
   getBattleById,
   performBattleMove,
   listMyBattles,
+  deleteBattle,
 };
