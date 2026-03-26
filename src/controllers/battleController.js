@@ -50,6 +50,38 @@ const resolveOpponent = async ({ friendId, friendCode }) => {
   });
 };
 
+const initializeBattleWithTeams = async (battle, userTeam, opponentTeam) => {
+  const userActive = userTeam.pokemons[0];
+  const opponentActive = opponentTeam.pokemons[0];
+
+  const [userData, opponentData] = await Promise.all([
+    getPokemonByNameOrId(userActive.pokemonId || userActive.pokemonName),
+    getPokemonByNameOrId(opponentActive.pokemonId || opponentActive.pokemonName),
+  ]);
+
+  battle.team = userTeam._id;
+  battle.opponentTeam = opponentTeam._id;
+  battle.userActivePokemon = {
+    pokemonId: userActive.pokemonId,
+    pokemonName: userActive.pokemonName,
+    moves: Array.isArray(userActive.moves) ? userActive.moves.slice(0, 4) : [],
+  };
+  battle.opponentActivePokemon = {
+    pokemonId: opponentActive.pokemonId,
+    pokemonName: opponentActive.pokemonName,
+    moves: Array.isArray(opponentActive.moves) ? opponentActive.moves.slice(0, 4) : [],
+  };
+  battle.userMaxHp = Math.max(60, getStatValue(userData, 'hp', 60) * 2);
+  battle.opponentMaxHp = Math.max(60, getStatValue(opponentData, 'hp', 60) * 2);
+  battle.userHp = battle.userMaxHp;
+  battle.opponentHp = battle.opponentMaxHp;
+  battle.turnUser = battle.user;
+  battle.turnNumber = 0;
+  battle.status = 'in_progress';
+  battle.summary = 'Batalla iniciada. Turno del retador.';
+  battle.battleLog = ['Batalla iniciada. Turno del retador.'];
+};
+
 const createBattleChallenge = async (req, res, next) => {
   try {
     const { friendId, friendCode } = req.body;
@@ -134,28 +166,70 @@ const acceptBattleChallenge = async (req, res, next) => {
     }
 
     battle.status = 'accepted';
-    battle.summary = 'Reto aceptado. Ambos jugadores deben elegir equipo.';
-    battle.battleLog = ['Reto aceptado. Ambos jugadores deben elegir equipo.'];
+    battle.summary = 'Reto aceptado. Preparando equipos...';
+    battle.battleLog = ['Reto aceptado. Preparando equipos...'];
+
+    const [challengerTeam, opponentTeam] = await Promise.all([
+      Team.findOne({ user: battle.user }).sort({ createdAt: 1 }),
+      Team.findOne({ user: battle.opponent }).sort({ createdAt: 1 }),
+    ]);
+
+    const canAutoStart =
+      challengerTeam &&
+      opponentTeam &&
+      Array.isArray(challengerTeam.pokemons) && challengerTeam.pokemons.length > 0 &&
+      Array.isArray(opponentTeam.pokemons) && opponentTeam.pokemons.length > 0;
+
+    if (canAutoStart) {
+      await initializeBattleWithTeams(battle, challengerTeam, opponentTeam);
+    } else {
+      battle.summary = 'Reto aceptado. Ambos jugadores deben elegir equipo.';
+      battle.battleLog = ['Reto aceptado. Ambos jugadores deben elegir equipo.'];
+    }
+
     await battle.save();
 
     await sendPushToUser(battle.user, {
       title: 'Aceptaron tu reto',
-      body: `${req.user.email} aceptó la batalla. Elijan equipo para empezar.`,
-      url: '/battles',
+      body: canAutoStart
+        ? `${req.user.email} aceptó. La batalla ya está lista.`
+        : `${req.user.email} aceptó la batalla. Elijan equipo para empezar.`,
+      url: canAutoStart ? `/battles/arena?battleId=${battle._id}` : '/battles',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
       tag: 'battle-accepted',
       urgency: 'high',
       ttlSeconds: 60,
-      actions: [{ action: 'open-battles', title: 'Elegir equipo' }],
+      actions: [{ action: 'open-battles', title: canAutoStart ? 'Jugar' : 'Elegir equipo' }],
       actionUrls: {
-        'open-battles': '/battles',
+        'open-battles': canAutoStart ? `/battles/arena?battleId=${battle._id}` : '/battles',
       },
       data: {
         type: 'battle-accepted',
         battleId: battle._id,
       },
     });
+
+    if (canAutoStart) {
+      await sendPushToUser(battle.opponent, {
+        title: 'Batalla iniciada',
+        body: 'Reto aceptado. Ya pueden jugar.',
+        url: `/battles/arena?battleId=${battle._id}`,
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'battle-started',
+        urgency: 'high',
+        ttlSeconds: 60,
+        actions: [{ action: 'open-battle', title: 'Jugar ahora' }],
+        actionUrls: {
+          'open-battle': `/battles/arena?battleId=${battle._id}`,
+        },
+        data: {
+          type: 'battle-started',
+          battleId: battle._id,
+        },
+      });
+    }
 
     return res.json(battle);
   } catch (error) {
@@ -290,32 +364,7 @@ const selectBattleTeam = async (req, res, next) => {
         Team.findById(battle.opponentTeam),
       ]);
 
-      const userActive = userTeam.pokemons[0];
-      const opponentActive = opponentTeam.pokemons[0];
-
-      const [userData, opponentData] = await Promise.all([
-        getPokemonByNameOrId(userActive.pokemonId || userActive.pokemonName),
-        getPokemonByNameOrId(opponentActive.pokemonId || opponentActive.pokemonName),
-      ]);
-
-      battle.userActivePokemon = {
-        pokemonId: userActive.pokemonId,
-        pokemonName: userActive.pokemonName,
-        moves: Array.isArray(userActive.moves) ? userActive.moves.slice(0, 4) : [],
-      };
-      battle.opponentActivePokemon = {
-        pokemonId: opponentActive.pokemonId,
-        pokemonName: opponentActive.pokemonName,
-        moves: Array.isArray(opponentActive.moves) ? opponentActive.moves.slice(0, 4) : [],
-      };
-      battle.userMaxHp = Math.max(60, getStatValue(userData, 'hp', 60) * 2);
-      battle.opponentMaxHp = Math.max(60, getStatValue(opponentData, 'hp', 60) * 2);
-      battle.userHp = battle.userMaxHp;
-      battle.opponentHp = battle.opponentMaxHp;
-      battle.turnUser = battle.user;
-      battle.status = 'in_progress';
-      battle.summary = 'Batalla iniciada. Turno del retador.';
-      battle.battleLog = ['Batalla iniciada. Turno del retador.'];
+      await initializeBattleWithTeams(battle, userTeam, opponentTeam);
 
       await sendPushToUser(battle.user, {
         title: 'Batalla iniciada',
