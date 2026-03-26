@@ -34,6 +34,12 @@ const battleSchema = new mongoose.Schema(
     turnNumber: { type: Number, default: 0 },
     maxTurns: { type: Number, default: 8 },
     battleLog: { type: [String], default: [] },
+    roundNumber: { type: Number, default: 1 },
+    pendingMoves: {
+      user: { type: String, default: '' },
+      opponent: { type: String, default: '' },
+    },
+    lastRoundSummary: { type: String, default: '' },
   },
   { timestamps: true }
 );

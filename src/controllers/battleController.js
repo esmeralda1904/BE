@@ -20,6 +20,70 @@ const computeDamage = ({ attackerData, defenderData, moveName }) => {
   return base + randomBonus + moveBonus;
 };
 
+const getSpeedValue = (pokemonData) => getStatValue(pokemonData, 'speed', 60);
+
+const resolveRound = async (battle) => {
+  const [userData, opponentData] = await Promise.all([
+    getPokemonByNameOrId(battle.userActivePokemon.pokemonId || battle.userActivePokemon.pokemonName),
+    getPokemonByNameOrId(battle.opponentActivePokemon.pokemonId || battle.opponentActivePokemon.pokemonName),
+  ]);
+
+  const userMove = normalizeMove(battle.pendingMoves.user);
+  const opponentMove = normalizeMove(battle.pendingMoves.opponent);
+
+  const userSpeed = getSpeedValue(userData);
+  const opponentSpeed = getSpeedValue(opponentData);
+
+  const userAttacksFirst =
+    userSpeed === opponentSpeed ? Math.random() >= 0.5 : userSpeed > opponentSpeed;
+
+  const attacks = userAttacksFirst
+    ? [
+        { actor: 'user', move: userMove, data: userData },
+        { actor: 'opponent', move: opponentMove, data: opponentData },
+      ]
+    : [
+        { actor: 'opponent', move: opponentMove, data: opponentData },
+        { actor: 'user', move: userMove, data: userData },
+      ];
+
+  const roundLogs = [];
+
+  for (const attack of attacks) {
+    const isUserActor = attack.actor === 'user';
+    const defenderAlive = isUserActor ? battle.opponentHp > 0 : battle.userHp > 0;
+
+    if (!defenderAlive) {
+      continue;
+    }
+
+    const defenderData = isUserActor ? opponentData : userData;
+    const damage = computeDamage({
+      attackerData: attack.data,
+      defenderData,
+      moveName: attack.move,
+    });
+
+    if (isUserActor) {
+      battle.opponentHp = Math.max(0, battle.opponentHp - damage);
+    } else {
+      battle.userHp = Math.max(0, battle.userHp - damage);
+    }
+
+    const actorName = isUserActor ? 'Retador' : 'Oponente';
+    roundLogs.push(`${actorName} usó ${attack.move} e hizo ${damage} de daño.`);
+  }
+
+  battle.pendingMoves = { user: '', opponent: '' };
+  battle.roundNumber += 1;
+
+  for (const entry of roundLogs.reverse()) {
+    battle.battleLog.unshift(`Ronda ${battle.roundNumber - 1}: ${entry}`);
+  }
+
+  battle.lastRoundSummary = roundLogs.join(' ');
+};
+
 const getBattleResultLabel = (battle) => {
   if (battle.userHp === battle.opponentHp) {
     return 'Empate técnico.';
@@ -78,8 +142,11 @@ const initializeBattleWithTeams = async (battle, userTeam, opponentTeam) => {
   battle.turnUser = battle.user;
   battle.turnNumber = 0;
   battle.status = 'in_progress';
-  battle.summary = 'Batalla iniciada. Turno del retador.';
-  battle.battleLog = ['Batalla iniciada. Turno del retador.'];
+  battle.summary = 'Batalla iniciada. Ambos jugadores eligen movimiento para resolver la ronda.';
+  battle.battleLog = ['Batalla iniciada. Ambos jugadores eligen movimiento para resolver la ronda.'];
+  battle.roundNumber = 1;
+  battle.pendingMoves = { user: '', opponent: '' };
+  battle.lastRoundSummary = '';
 };
 
 const createBattleChallenge = async (req, res, next) => {
@@ -447,41 +514,36 @@ const performBattleMove = async (req, res, next) => {
       return res.status(409).json({ message: 'La batalla no está en progreso' });
     }
 
-    if (!battle.turnUser || !battle.turnUser.equals(req.user._id)) {
-      return res.status(409).json({ message: 'Debes esperar tu turno' });
-    }
-
     const isUserTurn = battle.user._id.equals(req.user._id);
     const attackerSlot = isUserTurn ? 'userActivePokemon' : 'opponentActivePokemon';
-    const defenderSlot = isUserTurn ? 'opponentActivePokemon' : 'userActivePokemon';
     const attackerName = battle[attackerSlot].pokemonName;
-    const defenderName = battle[defenderSlot].pokemonName;
+    const pendingKey = isUserTurn ? 'user' : 'opponent';
+
+    if (battle.pendingMoves?.[pendingKey]) {
+      return res.status(409).json({ message: 'Ya elegiste movimiento para esta ronda. Espera al rival.' });
+    }
 
     const allowedMoves = (battle[attackerSlot].moves || []).map((move) => normalizeMove(move));
     if (allowedMoves.length && !allowedMoves.includes(normalizedMove)) {
       return res.status(400).json({ message: 'Movimiento no válido para este pokémon' });
     }
 
-    const [attackerData, defenderData] = await Promise.all([
-      getPokemonByNameOrId(battle[attackerSlot].pokemonId || attackerName),
-      getPokemonByNameOrId(battle[defenderSlot].pokemonId || defenderName),
-    ]);
+    battle.pendingMoves = {
+      ...(battle.pendingMoves || { user: '', opponent: '' }),
+      [pendingKey]: normalizedMove,
+    };
 
-    const damage = computeDamage({ attackerData, defenderData, moveName: normalizedMove });
+    const bothMovesReady = battle.pendingMoves.user && battle.pendingMoves.opponent;
 
-    if (isUserTurn) {
-      battle.opponentHp = Math.max(0, battle.opponentHp - damage);
-    } else {
-      battle.userHp = Math.max(0, battle.userHp - damage);
+    if (bothMovesReady) {
+      await resolveRound(battle);
     }
 
-    const actorEmail = isUserTurn ? battle.user.email : battle.opponent.email;
-    battle.battleLog.unshift(`${actorEmail} usó ${normalizedMove} e hizo ${damage} de daño.`);
-    battle.turnNumber += 1;
+    const maxRounds = Math.max(1, Math.floor((battle.maxTurns || 8) / 2));
+    const roundLimitReached = battle.roundNumber > maxRounds;
+    const someoneDefeated = battle.userHp <= 0 || battle.opponentHp <= 0;
 
-    const defenderDefeated = isUserTurn ? battle.opponentHp <= 0 : battle.userHp <= 0;
-
-    if (defenderDefeated || battle.turnNumber >= battle.maxTurns) {
+    if (someoneDefeated || roundLimitReached) {
       battle.status = 'finished';
 
       if (battle.userHp === battle.opponentHp) {
@@ -520,12 +582,21 @@ const performBattleMove = async (req, res, next) => {
         ttlSeconds: 60,
       });
     } else {
-      battle.turnUser = isUserTurn ? battle.opponent._id : battle.user._id;
-      battle.summary = `Turno de ${isUserTurn ? battle.opponent.email : battle.user.email}.`;
+      battle.summary = bothMovesReady
+        ? 'Ronda resuelta. Elijan movimiento para la siguiente ronda.'
+        : `${attackerName} eligió movimiento. Esperando al rival.`;
     }
 
     await battle.save();
-    return res.json(battle);
+
+    const updatedBattle = await Battle.findById(battleId)
+      .populate('user', 'email friendCode')
+      .populate('opponent', 'email friendCode')
+      .populate('team', 'name pokemons')
+      .populate('opponentTeam', 'name pokemons')
+      .populate('winner', 'email');
+
+    return res.json(updatedBattle);
   } catch (error) {
     next(error);
   }
