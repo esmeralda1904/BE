@@ -2,6 +2,8 @@ const express = require('express');
 const {
 	createBattleChallenge,
 	acceptBattleChallenge,
+	rejectBattleChallenge,
+	cancelBattleChallenge,
 	selectBattleTeam,
 	getBattleById,
 	performBattleMove,
@@ -16,6 +18,8 @@ router.get('/', listMyBattles);
 router.post('/challenges', createBattleChallenge);
 router.get('/:battleId', getBattleById);
 router.post('/:battleId/accept', acceptBattleChallenge);
+router.post('/:battleId/reject', rejectBattleChallenge);
+router.post('/:battleId/cancel', cancelBattleChallenge);
 router.post('/:battleId/team', selectBattleTeam);
 router.post('/:battleId/move', performBattleMove);
 

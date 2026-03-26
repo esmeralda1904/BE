@@ -163,6 +163,88 @@ const acceptBattleChallenge = async (req, res, next) => {
   }
 };
 
+const rejectBattleChallenge = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const battle = await Battle.findById(battleId)
+      .populate('user', 'email')
+      .populate('opponent', 'email');
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Reto no encontrado' });
+    }
+
+    if (!battle.opponent._id.equals(req.user._id)) {
+      return res.status(403).json({ message: 'Solo el jugador retado puede rechazar' });
+    }
+
+    if (battle.status !== 'pending') {
+      return res.status(409).json({ message: 'Este reto ya no está pendiente' });
+    }
+
+    battle.status = 'rejected';
+    battle.summary = 'Reto rechazado por el rival.';
+    battle.battleLog = ['Reto rechazado por el rival.'];
+    await battle.save();
+
+    await sendPushToUser(battle.user._id, {
+      title: 'Reto rechazado',
+      body: `${battle.opponent.email} rechazó tu solicitud de batalla.`,
+      url: '/battles',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'battle-rejected',
+      urgency: 'high',
+      ttlSeconds: 60,
+    });
+
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const cancelBattleChallenge = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const battle = await Battle.findById(battleId)
+      .populate('user', 'email')
+      .populate('opponent', 'email');
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Reto no encontrado' });
+    }
+
+    if (!battle.user._id.equals(req.user._id)) {
+      return res.status(403).json({ message: 'Solo quien retó puede cancelar la solicitud' });
+    }
+
+    if (!['pending', 'accepted'].includes(battle.status)) {
+      return res.status(409).json({ message: 'Esta solicitud ya no se puede cancelar' });
+    }
+
+    battle.status = 'rejected';
+    battle.summary = 'Reto cancelado por quien lo envió.';
+    battle.battleLog = ['Reto cancelado por quien lo envió.'];
+    await battle.save();
+
+    await sendPushToUser(battle.opponent._id, {
+      title: 'Solicitud cancelada',
+      body: `${battle.user.email} canceló la solicitud de batalla.`,
+      url: '/battles',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'battle-canceled',
+      urgency: 'high',
+      ttlSeconds: 60,
+    });
+
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const selectBattleTeam = async (req, res, next) => {
   try {
     const { battleId } = req.params;
@@ -422,6 +504,8 @@ const listMyBattles = async (req, res, next) => {
 module.exports = {
   createBattleChallenge,
   acceptBattleChallenge,
+  rejectBattleChallenge,
+  cancelBattleChallenge,
   selectBattleTeam,
   getBattleById,
   performBattleMove,
