@@ -1,124 +1,95 @@
 const Battle = require('../models/Battle');
 const Team = require('../models/Team');
 const User = require('../models/User');
-const { getPokemonByNameOrId, getTypeAdvantage, client } = require('../services/pokeApiService');
+const { getPokemonByNameOrId } = require('../services/pokeApiService');
 const { sendPushToUser } = require('../services/pushService');
 
-const sumStats = (pokemon) => pokemon.stats.reduce((acc, item) => acc + item.base_stat, 0);
+const normalizeMove = (moveName) => String(moveName || '').toLowerCase().trim();
 
-const bestMovePower = async (pokemon) => {
-  const firstMoves = pokemon.moves.slice(0, 6);
-  let best = 40;
-
-  for (const moveEntry of firstMoves) {
-    try {
-      const { data } = await client.get(moveEntry.move.url);
-      const power = data.power || 40;
-
-      if (power > best) {
-        best = power;
-      }
-    } catch (error) {
-      continue;
-    }
-  }
-
-  return best;
+const getStatValue = (pokemonData, statName, fallback = 60) => {
+  const stat = pokemonData?.stats?.find((item) => item.stat?.name === statName);
+  return stat?.base_stat || fallback;
 };
 
-const teamScore = async (team, rivalTeam) => {
-  let total = 0;
-
-  for (let i = 0; i < team.pokemons.length; i += 1) {
-    const ally = team.pokemons[i];
-    const rival = rivalTeam.pokemons[i % rivalTeam.pokemons.length];
-
-    const allyData = await getPokemonByNameOrId(ally.pokemonId || ally.pokemonName);
-    const rivalData = await getPokemonByNameOrId(rival.pokemonId || rival.pokemonName);
-
-    const allyTypes = allyData.types.map((entry) => entry.type.name);
-    const rivalTypes = rivalData.types.map((entry) => entry.type.name);
-    const advantage = await getTypeAdvantage(allyTypes, rivalTypes);
-    const attackPower = await bestMovePower(allyData);
-
-    total += sumStats(allyData) + attackPower * 1.5 + advantage * 50;
-  }
-
-  return Math.round(total);
+const computeDamage = ({ attackerData, defenderData, moveName }) => {
+  const attack = getStatValue(attackerData, 'attack', 60);
+  const defense = getStatValue(defenderData, 'defense', 60);
+  const base = Math.max(8, Math.round((attack / Math.max(25, defense)) * 14));
+  const randomBonus = Math.floor(Math.random() * 8);
+  const moveBonus = Math.min(10, normalizeMove(moveName).length % 11);
+  return base + randomBonus + moveBonus;
 };
 
-const createBattle = async (req, res, next) => {
+const getBattleResultLabel = (battle) => {
+  if (battle.userHp === battle.opponentHp) {
+    return 'Empate técnico.';
+  }
+
+  if (battle.winner && String(battle.winner) === String(battle.user)) {
+    return 'Ganó el retador.';
+  }
+
+  return 'Ganó el oponente.';
+};
+
+const ensureFriendRelation = async (me, opponentUser) => {
+  if (!me.friends.some((id) => id.equals(opponentUser._id))) {
+    return false;
+  }
+
+  return true;
+};
+
+const resolveOpponent = async ({ friendId, friendCode }) => {
+  if (friendId) {
+    return User.findById(friendId);
+  }
+
+  return User.findOne({
+    friendCode: String(friendCode || '').toUpperCase().trim(),
+  });
+};
+
+const createBattleChallenge = async (req, res, next) => {
   try {
-    const { friendId, friendCode, teamId, opponentTeamId } = req.body;
+    const { friendId, friendCode } = req.body;
 
-    if ((!friendId && !friendCode) || !teamId || !opponentTeamId) {
+    if (!friendId && !friendCode) {
       return res.status(400).json({
-        message: 'friendId o friendCode, teamId y opponentTeamId son requeridos',
+        message: 'friendId o friendCode es requerido',
       });
     }
 
     const me = await User.findById(req.user._id);
-    let opponentUser = null;
-
-    if (friendId) {
-      opponentUser = await User.findById(friendId);
-    } else {
-      opponentUser = await User.findOne({
-        friendCode: String(friendCode || '').toUpperCase().trim(),
-      });
-    }
+    const opponentUser = await resolveOpponent({ friendId, friendCode });
 
     if (!opponentUser) {
-      return res.status(404).json({ message: 'No se encontró la jugadora rival' });
+      return res.status(404).json({ message: 'No se encontró al jugador rival' });
     }
 
     if (opponentUser._id.equals(req.user._id)) {
       return res.status(400).json({ message: 'No puedes retarte a ti misma' });
     }
 
-    if (!me.friends.some((id) => id.equals(opponentUser._id))) {
+    const areFriends = await ensureFriendRelation(me, opponentUser);
+
+    if (!areFriends) {
       return res.status(403).json({
         message: 'Solo puedes retar a usuarios que ya aceptaron tu amistad',
       });
     }
 
-    const team = await Team.findOne({ _id: teamId, user: req.user._id });
-    const opponentTeam = await Team.findOne({ _id: opponentTeamId, user: opponentUser._id });
-
-    if (!team || !opponentTeam) {
-      return res.status(404).json({ message: 'No se encontró alguno de los equipos' });
-    }
-
-    if (team.pokemons.length === 0 || opponentTeam.pokemons.length === 0) {
-      return res.status(400).json({ message: 'Ambos equipos deben tener al menos 1 pokémon' });
-    }
-
-    const [myScoreBase, opponentScoreBase] = await Promise.all([
-      teamScore(team, opponentTeam),
-      teamScore(opponentTeam, team),
-    ]);
-
-    const userScore = myScoreBase + Math.floor(Math.random() * 20);
-    const opponentScore = opponentScoreBase + Math.floor(Math.random() * 20);
-    const winner = userScore >= opponentScore ? req.user._id : opponentUser._id;
-
     const battle = await Battle.create({
       user: req.user._id,
       opponent: opponentUser._id,
-      team: team._id,
-      opponentTeam: opponentTeam._id,
-      winner,
-      userScore,
-      opponentScore,
-      summary:
-        winner.toString() === req.user._id.toString()
-          ? 'Ganaste la batalla por ventaja estratégica.'
-          : 'Tu amigo ganó la batalla en esta ronda.',
+      status: 'pending',
+      summary: 'Reto enviado. Esperando aceptación del rival.',
+      battleLog: ['Reto enviado. Esperando aceptación del rival.'],
     });
 
     await sendPushToUser(opponentUser._id, {
       title: 'Te retaron a una batalla',
-      body: `${req.user.email} te retó en Pokédex Battles.`,
+      body: `${req.user.email} quiere batallar contigo.`,
       url: '/battles',
       icon: '/icon-192.png',
       badge: '/icon-96.png',
@@ -145,6 +116,290 @@ const createBattle = async (req, res, next) => {
   }
 };
 
+const acceptBattleChallenge = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const battle = await Battle.findById(battleId);
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Reto no encontrado' });
+    }
+
+    if (!battle.opponent.equals(req.user._id)) {
+      return res.status(403).json({ message: 'Solo el jugador retado puede aceptar' });
+    }
+
+    if (battle.status !== 'pending') {
+      return res.status(409).json({ message: 'Este reto ya no está pendiente' });
+    }
+
+    battle.status = 'accepted';
+    battle.summary = 'Reto aceptado. Ambos jugadores deben elegir equipo.';
+    battle.battleLog = ['Reto aceptado. Ambos jugadores deben elegir equipo.'];
+    await battle.save();
+
+    await sendPushToUser(battle.user, {
+      title: 'Aceptaron tu reto',
+      body: `${req.user.email} aceptó la batalla. Elijan equipo para empezar.`,
+      url: '/battles',
+      icon: '/icon-192.png',
+      badge: '/icon-96.png',
+      tag: 'battle-accepted',
+      urgency: 'high',
+      ttlSeconds: 60,
+      actions: [{ action: 'open-battles', title: 'Elegir equipo' }],
+      actionUrls: {
+        'open-battles': '/battles',
+      },
+      data: {
+        type: 'battle-accepted',
+        battleId: battle._id,
+      },
+    });
+
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const selectBattleTeam = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const { teamId } = req.body;
+
+    if (!teamId) {
+      return res.status(400).json({ message: 'teamId es requerido' });
+    }
+
+    const battle = await Battle.findById(battleId);
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Batalla no encontrada' });
+    }
+
+    if (!battle.user.equals(req.user._id) && !battle.opponent.equals(req.user._id)) {
+      return res.status(403).json({ message: 'No tienes acceso a esta batalla' });
+    }
+
+    if (!['accepted', 'in_progress'].includes(battle.status)) {
+      return res.status(409).json({ message: 'La batalla no está en fase de selección de equipo' });
+    }
+
+    const selectedTeam = await Team.findOne({ _id: teamId, user: req.user._id });
+
+    if (!selectedTeam) {
+      return res.status(404).json({ message: 'Equipo no encontrado' });
+    }
+
+    if (!selectedTeam.pokemons.length) {
+      return res.status(400).json({ message: 'El equipo debe tener al menos 1 pokémon' });
+    }
+
+    if (battle.user.equals(req.user._id)) {
+      battle.team = selectedTeam._id;
+    } else {
+      battle.opponentTeam = selectedTeam._id;
+    }
+
+    if (battle.team && battle.opponentTeam && battle.status !== 'in_progress') {
+      const [userTeam, opponentTeam] = await Promise.all([
+        Team.findById(battle.team),
+        Team.findById(battle.opponentTeam),
+      ]);
+
+      const userActive = userTeam.pokemons[0];
+      const opponentActive = opponentTeam.pokemons[0];
+
+      const [userData, opponentData] = await Promise.all([
+        getPokemonByNameOrId(userActive.pokemonId || userActive.pokemonName),
+        getPokemonByNameOrId(opponentActive.pokemonId || opponentActive.pokemonName),
+      ]);
+
+      battle.userActivePokemon = {
+        pokemonId: userActive.pokemonId,
+        pokemonName: userActive.pokemonName,
+        moves: Array.isArray(userActive.moves) ? userActive.moves.slice(0, 4) : [],
+      };
+      battle.opponentActivePokemon = {
+        pokemonId: opponentActive.pokemonId,
+        pokemonName: opponentActive.pokemonName,
+        moves: Array.isArray(opponentActive.moves) ? opponentActive.moves.slice(0, 4) : [],
+      };
+      battle.userMaxHp = Math.max(60, getStatValue(userData, 'hp', 60) * 2);
+      battle.opponentMaxHp = Math.max(60, getStatValue(opponentData, 'hp', 60) * 2);
+      battle.userHp = battle.userMaxHp;
+      battle.opponentHp = battle.opponentMaxHp;
+      battle.turnUser = battle.user;
+      battle.status = 'in_progress';
+      battle.summary = 'Batalla iniciada. Turno del retador.';
+      battle.battleLog = ['Batalla iniciada. Turno del retador.'];
+
+      await sendPushToUser(battle.user, {
+        title: 'Batalla iniciada',
+        body: 'Ambos equipos están listos. Es tu turno.',
+        url: '/battles',
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'battle-started',
+        urgency: 'high',
+        ttlSeconds: 60,
+      });
+
+      await sendPushToUser(battle.opponent, {
+        title: 'Batalla iniciada',
+        body: 'Ambos equipos están listos. Espera el turno del rival.',
+        url: '/battles',
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'battle-started',
+        urgency: 'high',
+        ttlSeconds: 60,
+      });
+    }
+
+    await battle.save();
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getBattleById = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const battle = await Battle.findById(battleId)
+      .populate('user', 'email friendCode')
+      .populate('opponent', 'email friendCode')
+      .populate('team', 'name pokemons')
+      .populate('opponentTeam', 'name pokemons')
+      .populate('winner', 'email');
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Batalla no encontrada' });
+    }
+
+    if (!battle.user._id.equals(req.user._id) && !battle.opponent._id.equals(req.user._id)) {
+      return res.status(403).json({ message: 'No tienes acceso a esta batalla' });
+    }
+
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const performBattleMove = async (req, res, next) => {
+  try {
+    const { battleId } = req.params;
+    const { moveName } = req.body;
+    const normalizedMove = normalizeMove(moveName);
+
+    if (!normalizedMove) {
+      return res.status(400).json({ message: 'moveName es requerido' });
+    }
+
+    const battle = await Battle.findById(battleId)
+      .populate('user', 'email')
+      .populate('opponent', 'email')
+      .populate('winner', 'email');
+
+    if (!battle) {
+      return res.status(404).json({ message: 'Batalla no encontrada' });
+    }
+
+    if (!battle.user._id.equals(req.user._id) && !battle.opponent._id.equals(req.user._id)) {
+      return res.status(403).json({ message: 'No tienes acceso a esta batalla' });
+    }
+
+    if (battle.status !== 'in_progress') {
+      return res.status(409).json({ message: 'La batalla no está en progreso' });
+    }
+
+    if (!battle.turnUser || !battle.turnUser.equals(req.user._id)) {
+      return res.status(409).json({ message: 'Debes esperar tu turno' });
+    }
+
+    const isUserTurn = battle.user._id.equals(req.user._id);
+    const attackerSlot = isUserTurn ? 'userActivePokemon' : 'opponentActivePokemon';
+    const defenderSlot = isUserTurn ? 'opponentActivePokemon' : 'userActivePokemon';
+    const attackerName = battle[attackerSlot].pokemonName;
+    const defenderName = battle[defenderSlot].pokemonName;
+
+    const allowedMoves = (battle[attackerSlot].moves || []).map((move) => normalizeMove(move));
+    if (allowedMoves.length && !allowedMoves.includes(normalizedMove)) {
+      return res.status(400).json({ message: 'Movimiento no válido para este pokémon' });
+    }
+
+    const [attackerData, defenderData] = await Promise.all([
+      getPokemonByNameOrId(battle[attackerSlot].pokemonId || attackerName),
+      getPokemonByNameOrId(battle[defenderSlot].pokemonId || defenderName),
+    ]);
+
+    const damage = computeDamage({ attackerData, defenderData, moveName: normalizedMove });
+
+    if (isUserTurn) {
+      battle.opponentHp = Math.max(0, battle.opponentHp - damage);
+    } else {
+      battle.userHp = Math.max(0, battle.userHp - damage);
+    }
+
+    const actorEmail = isUserTurn ? battle.user.email : battle.opponent.email;
+    battle.battleLog.unshift(`${actorEmail} usó ${normalizedMove} e hizo ${damage} de daño.`);
+    battle.turnNumber += 1;
+
+    const defenderDefeated = isUserTurn ? battle.opponentHp <= 0 : battle.userHp <= 0;
+
+    if (defenderDefeated || battle.turnNumber >= battle.maxTurns) {
+      battle.status = 'finished';
+
+      if (battle.userHp === battle.opponentHp) {
+        battle.winner = null;
+        battle.summary = 'Empate técnico.';
+      } else if (battle.userHp > battle.opponentHp) {
+        battle.winner = battle.user._id;
+        battle.summary = 'Batalla finalizada: ganó el retador.';
+      } else {
+        battle.winner = battle.opponent._id;
+        battle.summary = 'Batalla finalizada: ganó el oponente.';
+      }
+
+      battle.userScore = battle.userHp;
+      battle.opponentScore = battle.opponentHp;
+
+      await sendPushToUser(battle.user._id, {
+        title: 'Batalla terminada',
+        body: `Resultado: ${getBattleResultLabel(battle)}`,
+        url: '/battles',
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'battle-finished',
+        urgency: 'high',
+        ttlSeconds: 60,
+      });
+
+      await sendPushToUser(battle.opponent._id, {
+        title: 'Batalla terminada',
+        body: `Resultado: ${getBattleResultLabel(battle)}`,
+        url: '/battles',
+        icon: '/icon-192.png',
+        badge: '/icon-96.png',
+        tag: 'battle-finished',
+        urgency: 'high',
+        ttlSeconds: 60,
+      });
+    } else {
+      battle.turnUser = isUserTurn ? battle.opponent._id : battle.user._id;
+      battle.summary = `Turno de ${isUserTurn ? battle.opponent.email : battle.user.email}.`;
+    }
+
+    await battle.save();
+    return res.json(battle);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const listMyBattles = async (req, res, next) => {
   try {
     const battles = await Battle.find({
@@ -154,8 +409,9 @@ const listMyBattles = async (req, res, next) => {
       .populate('opponent', 'email friendCode')
       .populate('team', 'name')
       .populate('opponentTeam', 'name')
+      .populate('winner', 'email')
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(50);
 
     res.json(battles);
   } catch (error) {
@@ -164,6 +420,10 @@ const listMyBattles = async (req, res, next) => {
 };
 
 module.exports = {
-  createBattle,
+  createBattleChallenge,
+  acceptBattleChallenge,
+  selectBattleTeam,
+  getBattleById,
+  performBattleMove,
   listMyBattles,
 };
