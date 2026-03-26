@@ -1,10 +1,12 @@
 const User = require('../models/User');
+const Favorite = require('../models/Favorite');
 const { sendPushToUser } = require('../services/pushService');
 
-const toPublicUser = (user) => ({
+const toPublicUser = (user, favorites = []) => ({
   _id: user._id,
   email: user.email,
   friendCode: user.friendCode,
+  favorites,
 });
 
 const addFriendByCode = async (req, res, next) => {
@@ -135,10 +137,46 @@ const listFriends = async (req, res, next) => {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
 
+    const relatedUsers = [
+      ...user.friends,
+      ...user.friendRequestsReceived,
+      ...user.friendRequestsSent,
+    ];
+
+    const relatedUserIds = [...new Set(relatedUsers.map((entry) => String(entry._id)))];
+
+    const favorites = relatedUserIds.length
+      ? await Favorite.find({ user: { $in: relatedUserIds } })
+          .select('user pokemonId pokemonName nickname isShiny')
+          .sort({ createdAt: -1 })
+      : [];
+
+    const favoritesByUserId = favorites.reduce((acc, favorite) => {
+      const userId = String(favorite.user);
+
+      if (!acc[userId]) {
+        acc[userId] = [];
+      }
+
+      acc[userId].push({
+        _id: favorite._id,
+        pokemonId: favorite.pokemonId,
+        pokemonName: favorite.pokemonName,
+        nickname: favorite.nickname,
+        isShiny: favorite.isShiny,
+      });
+
+      return acc;
+    }, {});
+
     res.json({
-      friends: user.friends.map(toPublicUser),
-      incomingRequests: user.friendRequestsReceived.map(toPublicUser),
-      outgoingRequests: user.friendRequestsSent.map(toPublicUser),
+      friends: user.friends.map((entry) => toPublicUser(entry, favoritesByUserId[String(entry._id)] || [])),
+      incomingRequests: user.friendRequestsReceived.map((entry) =>
+        toPublicUser(entry, favoritesByUserId[String(entry._id)] || [])
+      ),
+      outgoingRequests: user.friendRequestsSent.map((entry) =>
+        toPublicUser(entry, favoritesByUserId[String(entry._id)] || [])
+      ),
     });
   } catch (error) {
     next(error);
